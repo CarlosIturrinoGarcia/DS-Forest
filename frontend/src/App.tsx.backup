@@ -1,0 +1,58 @@
+import { useEffect } from 'react';
+import { ReactFlowProvider } from 'reactflow';
+import Header from './components/ui/Header';
+import Canvas from './components/Canvas/Canvas';
+import NodePalette from './components/Sidebar/NodePalette';
+import NodeEditor from './components/Sidebar/NodeEditor';
+import EffortValueMatrix from './components/Matrix/EffortValueMatrix';
+import { useProjectStore } from './stores/projectStore';
+
+function App() {
+  const { viewMode, loadFromStorage } = useProjectStore();
+
+  useEffect(() => {
+    // Load project from localStorage on mount
+    loadFromStorage();
+  }, [loadFromStorage]);
+
+  return (
+    <div
+      className="h-screen w-screen flex flex-col overflow-hidden"
+      style={{
+        height: '100vh',
+        width: '100vw',
+        display: 'flex',
+        flexDirection: 'column',
+        overflow: 'hidden',
+        backgroundColor: '#f9fafb'
+      }}
+    >
+      <Header />
+
+      <div
+        className="flex-1 flex overflow-hidden"
+        style={{
+          flex: 1,
+          display: 'flex',
+          overflow: 'hidden'
+        }}
+      >
+        {viewMode === 'canvas' ? (
+          <ReactFlowProvider>
+            <NodePalette />
+            <div className="flex-1" style={{ flex: 1 }}>
+              <Canvas />
+            </div>
+            <NodeEditor />
+          </ReactFlowProvider>
+        ) : (
+          <div className="flex-1" style={{ flex: 1 }}>
+            <EffortValueMatrix />
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+export default App;

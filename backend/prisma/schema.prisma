@@ -1,0 +1,236 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id          String      @id @default(uuid())
+  email       String      @unique
+  password    String
+  name        String
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+  projects    Project[]
+  comments    Comment[]
+  timeEntries TimeEntry[]
+  assignedCards Card[]
+}
+
+model Project {
+  id          String      @id @default(uuid())
+  name        String
+  description String?
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+  userId      String
+  user        User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  nodes       Node[]
+  edges       Edge[]
+  datasets    Dataset[]
+  costEntries CostEntry[]
+  boards      Board[]
+}
+
+model Node {
+  id          String   @id @default(uuid())
+  type        String   // 'start' | 'solution' | 'experiment' | 'decision' | 'end'
+  label       String
+  description String?
+  x           Float
+  y           Float
+  effort      Int      @default(5)
+  value       Int      @default(5)
+  priority    String   @default("medium") // 'low' | 'medium' | 'high' | 'critical'
+  status      String   @default("todo") // 'todo' | 'in_progress' | 'review' | 'done'
+  assignees   String?  // JSON array of team member IDs
+  tags        String?  // JSON array of tags
+  dueDate     String?
+
+  // Experiment Tracking & Hypothesis Framework
+  hypothesis       String?  // What hypothesis we're testing
+  expectedOutcome  String?  // What we expect to happen
+  actualResult     String?  // What actually happened
+  learnings        String?  // Key learnings from this experiment
+  experimentId     String?  // Link to MLflow/W&B experiment
+  metrics          String?  // JSON: {"accuracy": 0.85, "loss": 0.12}
+  parameters       String?  // JSON: {"learning_rate": 0.01, "epochs": 100}
+  notebookLink     String?  // Link to Jupyter notebook
+  experimentStatus String   @default("pending") // 'pending' | 'success' | 'failure'
+
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+  projectId   String
+  project     Project       @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  edgesFrom   Edge[]        @relation("EdgeFrom")
+  edgesTo     Edge[]        @relation("EdgeTo")
+  models      Model[]
+  comments    Comment[]
+  timeEntries TimeEntry[]
+  costEntries CostEntry[]
+  datasets    NodeDataset[]
+}
+
+model Edge {
+  id        String   @id @default(uuid())
+  fromId    String
+  toId      String
+  createdAt DateTime @default(now())
+  projectId String
+  project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  from      Node     @relation("EdgeFrom", fields: [fromId], references: [id], onDelete: Cascade)
+  to        Node     @relation("EdgeTo", fields: [toId], references: [id], onDelete: Cascade)
+}
+
+// Dataset Management
+model Dataset {
+  id              String        @id @default(uuid())
+  name            String
+  version         String
+  location        String        // File path, S3 URL, etc.
+  size            Int?          // Size in bytes
+  schema          String?       // JSON schema definition
+  qualityMetrics  String?       // JSON: {"completeness": 0.95, "accuracy": 0.98}
+  description     String?
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+  projectId       String
+  project         Project       @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  nodes           NodeDataset[]
+}
+
+// Many-to-many relationship between Node and Dataset
+model NodeDataset {
+  id        String   @id @default(uuid())
+  nodeId    String
+  datasetId String
+  role      String   // 'input' | 'output' | 'validation' | 'test'
+  createdAt DateTime @default(now())
+
+  node      Node     @relation(fields: [nodeId], references: [id], onDelete: Cascade)
+  dataset   Dataset  @relation(fields: [datasetId], references: [id], onDelete: Cascade)
+
+  @@unique([nodeId, datasetId])
+}
+
+// Model Registry
+model Model {
+  id                String   @id @default(uuid())
+  name              String
+  version           String
+  nodeId            String
+  metrics           String?  // JSON: {"accuracy": 0.92, "f1": 0.89}
+  artifactLocation  String?  // S3 URL, file path, etc.
+  deploymentStatus  String   @default("development") // 'development' | 'staging' | 'production' | 'archived'
+  isChampion        Boolean  @default(false)
+  framework         String?  // 'tensorflow' | 'pytorch' | 'scikit-learn' | 'xgboost'
+  description       String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  node              Node     @relation(fields: [nodeId], references: [id], onDelete: Cascade)
+}
+
+// Comments & Collaboration
+model Comment {
+  id         String   @id @default(uuid())
+  content    String
+  nodeId     String
+  userId     String
+  mentions   String?  // JSON array of user IDs
+  isResolved Boolean  @default(false)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  node       Node     @relation(fields: [nodeId], references: [id], onDelete: Cascade)
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+// Time Tracking
+model TimeEntry {
+  id          String    @id @default(uuid())
+  nodeId      String
+  userId      String
+  startTime   DateTime
+  endTime     DateTime?
+  duration    Int?      // Duration in minutes
+  description String?
+  createdAt   DateTime  @default(now())
+
+  node        Node      @relation(fields: [nodeId], references: [id], onDelete: Cascade)
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+// Cost Tracking
+model CostEntry {
+  id          String   @id @default(uuid())
+  amount      Float
+  currency    String   @default("USD")
+  type        String   // 'compute' | 'storage' | 'api' | 'other'
+  description String?
+  date        DateTime @default(now())
+  nodeId      String?
+  projectId   String?
+
+  node        Node?    @relation(fields: [nodeId], references: [id], onDelete: Cascade)
+  project     Project? @relation(fields: [projectId], references: [id], onDelete: Cascade)
+}
+
+// Kanban Board System
+model Board {
+  id          String   @id @default(uuid())
+  name        String
+  description String?
+  projectId   String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  project     Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  columns     Column[]
+  cards       Card[]
+}
+
+model Column {
+  id        String   @id @default(uuid())
+  title     String
+  order     Int      // For ordering columns left to right
+  boardId   String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  board     Board    @relation(fields: [boardId], references: [id], onDelete: Cascade)
+  cards     Card[]
+
+  @@unique([boardId, order])
+}
+
+model Card {
+  id             String   @id @default(uuid())
+  title          String
+  description    String?
+  columnId       String
+  boardId        String
+  order          Int      // Position within column
+  assignedToId   String?
+  priority       String   @default("medium") // 'low' | 'medium' | 'high' | 'critical'
+  tags           String?  // JSON array of tags
+  dueDate        String?
+  estimatedHours Float?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  column         Column   @relation(fields: [columnId], references: [id], onDelete: Cascade)
+  board          Board    @relation(fields: [boardId], references: [id], onDelete: Cascade)
+  assignedTo     User?    @relation(fields: [assignedToId], references: [id], onDelete: SetNull)
+
+  @@unique([columnId, order])
+}

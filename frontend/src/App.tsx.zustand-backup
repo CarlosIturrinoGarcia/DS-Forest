@@ -1,0 +1,98 @@
+import { useProjectStore } from './stores/projectStore';
+
+console.log('App.tsx loaded');
+
+function App() {
+  console.log('App rendering...');
+
+  const { project, initProject } = useProjectStore();
+
+  const handleCreateProject = () => {
+    const name = prompt('Enter project name:', 'My DS Project');
+    if (name) {
+      initProject(name, '');
+    }
+  };
+
+  return (
+    <div style={{
+      width: '100vw',
+      height: '100vh',
+      backgroundColor: '#f9fafb',
+      display: 'flex',
+      flexDirection: 'column',
+      overflow: 'hidden'
+    }}>
+      <header style={{
+        height: '64px',
+        backgroundColor: 'white',
+        borderBottom: '1px solid #e5e7eb',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        padding: '0 24px'
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+          <div style={{
+            width: '32px',
+            height: '32px',
+            background: 'linear-gradient(to bottom right, #3b82f6, #9333ea)',
+            borderRadius: '8px',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            color: 'white',
+            fontWeight: 'bold',
+            fontSize: '14px'
+          }}>
+            DS
+          </div>
+          <h1 style={{ fontSize: '20px', fontWeight: 'bold', color: '#111827', margin: 0 }}>
+            DS Forest
+          </h1>
+          {project && (
+            <>
+              <div style={{ width: '1px', height: '24px', backgroundColor: '#d1d5db' }} />
+              <span style={{ fontSize: '18px', fontWeight: '500', color: '#374151' }}>
+                {project.name}
+              </span>
+            </>
+          )}
+        </div>
+
+        {!project && (
+          <button
+            onClick={handleCreateProject}
+            style={{
+              padding: '8px 16px',
+              backgroundColor: '#3b82f6',
+              color: 'white',
+              borderRadius: '6px',
+              border: 'none',
+              fontWeight: '500',
+              cursor: 'pointer'
+            }}
+          >
+            Create Project
+          </button>
+        )}
+      </header>
+
+      <div style={{
+        flex: 1,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center'
+      }}>
+        <div style={{ textAlign: 'center', color: '#6b7280' }}>
+          <h2 style={{ fontSize: '24px', fontWeight: 'bold', color: '#374151', marginBottom: '8px' }}>
+            {project ? `Project: ${project.name}` : 'Welcome to DS Forest'}
+          </h2>
+          <p>{project ? 'Zustand store is working!' : 'Click "Create Project" to get started'}</p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export default App;

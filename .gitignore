@@ -1,0 +1,36 @@
+# Dependencies
+node_modules/
+*.log
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# Database
+*.db
+*.db-journal
+
+# Build outputs
+dist/
+build/
+.next/
+.nuxt/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Prisma
+backend/prisma/dev.db
+backend/prisma/*.db
+
+# Local development
+.claude/
