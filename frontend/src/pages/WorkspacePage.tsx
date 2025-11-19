@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { api } from '../services/api';
 import BoardView from '../components/BoardView';
+import PipelineView from '../components/PipelineView';
 
 type NodeType = 'start' | 'experiment' | 'end';
 type Priority = 'low' | 'medium' | 'high' | 'critical';
@@ -87,7 +88,7 @@ interface WorkspacePageProps {
 export default function WorkspacePage({ user, projectId, onLogout, onBackToHome }: WorkspacePageProps) {
   const [project, setProject] = useState<any | null>(null);
   const [isLoading, setIsLoading] = useState(true);
-  const [viewMode, setViewMode] = useState<'canvas' | 'matrix' | 'boards'>('canvas');
+  const [viewMode, setViewMode] = useState<'canvas' | 'matrix' | 'boards' | 'pipeline'>('canvas');
   const [nodes, setNodes] = useState<NodeData[]>([]);
   const [connections, setConnections] = useState<Connection[]>([]);
   const [teamMembers] = useState<TeamMember[]>(INITIAL_TEAM);
@@ -724,6 +725,20 @@ export default function WorkspacePage({ user, projectId, onLogout, onBackToHome 
             >
               Boards
             </button>
+            <button
+              onClick={() => setViewMode('pipeline')}
+              style={{
+                padding: '6px 12px',
+                backgroundColor: viewMode === 'pipeline' ? 'white' : 'transparent',
+                border: 'none',
+                borderRadius: '4px',
+                cursor: 'pointer',
+                fontWeight: '500',
+                color: viewMode === 'pipeline' ? '#3b82f6' : '#6b7280'
+              }}
+            >
+              Pipeline
+            </button>
           </div>
 
           {/* User info and logout */}
@@ -752,6 +767,8 @@ export default function WorkspacePage({ user, projectId, onLogout, onBackToHome 
       <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
         {viewMode === 'boards' ? (
           <BoardView projectId={projectId} user={user} />
+        ) : viewMode === 'pipeline' ? (
+          <PipelineView projectId={projectId} />
         ) : viewMode === 'canvas' ? (
           <>
             {/* Card Palette */}
