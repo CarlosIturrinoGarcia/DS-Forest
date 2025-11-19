@@ -1,7 +1,5 @@
 import { useState, useCallback, useRef } from 'react';
 import ReactFlow, {
-  Node,
-  Edge,
   addEdge,
   Background,
   Controls,
@@ -9,6 +7,8 @@ import ReactFlow, {
   useNodesState,
   useEdgesState,
   MarkerType,
+  type Node,
+  type Edge,
   type Connection,
 } from 'reactflow';
 import 'reactflow/dist/style.css';
