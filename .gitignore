@@ -34,3 +34,6 @@ backend/prisma/*.db
 
 # Local development
 .claude/
+
+# Project notes (private)
+project-notes.txt

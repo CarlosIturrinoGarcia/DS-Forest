@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { api } from '../services/api';
 import BoardView from '../components/BoardView';
 
-type NodeType = 'start' | 'solution' | 'experiment' | 'decision' | 'end';
+type NodeType = 'start' | 'experiment' | 'end';
 type Priority = 'low' | 'medium' | 'high' | 'critical';
 type CardStatus = 'todo' | 'in_progress' | 'review' | 'done';
 
@@ -35,7 +35,13 @@ interface NodeData {
   metrics?: any; // JSON object
   parameters?: any; // JSON object
   notebookLink?: string;
+  notebookHtml?: string; // Stored HTML version of notebook
+  notebookFilename?: string; // Original filename
   experimentStatus?: 'pending' | 'success' | 'failure';
+  // Container support
+  parentId?: string; // ID of parent container
+  childrenIds?: string[]; // IDs of child nodes (only for container type)
+  isExpanded?: boolean; // Whether container is expanded
 }
 
 interface Connection {
@@ -93,14 +99,20 @@ export default function WorkspacePage({ user, projectId, onLogout, onBackToHome 
   const [comments, setComments] = useState<any[]>([]);
   const [activeTimer, setActiveTimer] = useState<any | null>(null);
   const [costEntries, setCostEntries] = useState<any[]>([]);
-  const [showDatasetModal, setShowDatasetModal] = useState(false);
-  const [showModelModal, setShowModelModal] = useState(false);
-  const [showCostModal, setShowCostModal] = useState(false);
+  const [showDatasetModal] = useState(false);
+  const [showModelModal] = useState(false);
+  const [showCostModal] = useState(false);
   const [editorTab, setEditorTab] = useState<'details' | 'models' | 'comments' | 'tracking'>('details');
   const [draggingNodeId, setDraggingNodeId] = useState<string | null>(null);
   const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
   const [connectingFrom, setConnectingFrom] = useState<string | null>(null);
   const canvasRef = useRef<HTMLDivElement>(null);
+  const lastSavedNodesRef = useRef<string>('');
+  const [saveStatus, setSaveStatus] = useState<'saved' | 'saving' | 'unsaved'>('saved');
+  const [showNotebookViewer, setShowNotebookViewer] = useState(false);
+  const [uploadingNotebook, setUploadingNotebook] = useState(false);
+  const [newMetricKey, setNewMetricKey] = useState('');
+  const [newMetricValue, setNewMetricValue] = useState('');
 
   // Load project from backend
   useEffect(() => {
@@ -108,8 +120,54 @@ export default function WorkspacePage({ user, projectId, onLogout, onBackToHome 
       try {
         const projectData = await api.getProject(projectId);
         setProject(projectData);
-        setNodes(projectData.nodes || []);
-        setConnections(projectData.edges || []);
+
+        // Parse nodes and handle JSON fields
+        const parsedNodes = (projectData.nodes || []).map((node: any) => ({
+          ...node,
+          assignees: typeof node.assignees === 'string' ? JSON.parse(node.assignees || '[]') : (node.assignees || []),
+          tags: typeof node.tags === 'string' ? JSON.parse(node.tags || '[]') : (node.tags || []),
+          childrenIds: typeof node.childrenIds === 'string' ? JSON.parse(node.childrenIds || '[]') : (node.childrenIds || []),
+          metrics: typeof node.metrics === 'string' ? JSON.parse(node.metrics || '{}') : node.metrics,
+          parameters: typeof node.parameters === 'string' ? JSON.parse(node.parameters || '{}') : node.parameters,
+        }));
+
+        setNodes(parsedNodes);
+
+        // Set the initial hash to prevent immediate save after load
+        lastSavedNodesRef.current = JSON.stringify(parsedNodes.map(n => ({
+          id: n.id,
+          type: n.type,
+          label: n.label,
+          description: n.description,
+          x: Math.round(n.x),
+          y: Math.round(n.y),
+          effort: n.effort,
+          value: n.value,
+          priority: n.priority,
+          status: n.status,
+          assignees: n.assignees,
+          tags: n.tags,
+          dueDate: n.dueDate,
+          hypothesis: n.hypothesis,
+          expectedOutcome: n.expectedOutcome,
+          actualResult: n.actualResult,
+          learnings: n.learnings,
+          experimentId: n.experimentId,
+          experimentStatus: n.experimentStatus,
+          notebookLink: n.notebookLink,
+          parentId: n.parentId,
+          childrenIds: n.childrenIds,
+          isExpanded: n.isExpanded,
+        })));
+
+        // Parse edges
+        const parsedEdges = (projectData.edges || []).map((edge: any) => ({
+          id: edge.id,
+          from: edge.fromId,
+          to: edge.toId
+        }));
+
+        setConnections(parsedEdges);
       } catch (error) {
         console.error('Failed to load project:', error);
         alert('Failed to load project');
@@ -165,14 +223,178 @@ export default function WorkspacePage({ user, projectId, onLogout, onBackToHome 
     loadNodeData();
   }, [selectedNodeId]);
 
-  const handleCreateProject = () => {
-    const name = prompt('Enter project name:', 'My DS Project');
-    if (name) {
-      setProject({ name });
+  // Auto-save nodes to backend when they change
+  useEffect(() => {
+    if (!project || nodes.length === 0) return;
+
+    // Create a hash of the nodes to detect actual changes
+    const nodesHash = JSON.stringify(nodes.map(n => ({
+      id: n.id,
+      type: n.type,
+      label: n.label,
+      description: n.description,
+      x: Math.round(n.x), // Round to avoid saving tiny position changes
+      y: Math.round(n.y),
+      effort: n.effort,
+      value: n.value,
+      priority: n.priority,
+      status: n.status,
+      assignees: n.assignees,
+      tags: n.tags,
+      dueDate: n.dueDate,
+      hypothesis: n.hypothesis,
+      expectedOutcome: n.expectedOutcome,
+      actualResult: n.actualResult,
+      learnings: n.learnings,
+      experimentId: n.experimentId,
+      experimentStatus: n.experimentStatus,
+      notebookLink: n.notebookLink,
+      parentId: n.parentId,
+      childrenIds: n.childrenIds,
+      isExpanded: n.isExpanded,
+    })));
+
+    // Skip save if nothing changed
+    if (nodesHash === lastSavedNodesRef.current) {
+      return;
+    }
+
+    // Mark as unsaved immediately
+    setSaveStatus('unsaved');
+
+    const saveNodes = async () => {
+      setSaveStatus('saving');
+      try {
+        // Save all nodes to backend
+        await Promise.all(
+          nodes.map(async (node) => {
+            try {
+              await api.updateNode(node.id, {
+                type: node.type,
+                label: node.label,
+                description: node.description,
+                x: Math.round(node.x),
+                y: Math.round(node.y),
+                effort: node.effort,
+                value: node.value,
+                priority: node.priority,
+                status: node.status,
+                assignees: JSON.stringify(Array.isArray(node.assignees) ? node.assignees : []),
+                tags: JSON.stringify(Array.isArray(node.tags) ? node.tags : []),
+                dueDate: node.dueDate,
+                hypothesis: node.hypothesis,
+                expectedOutcome: node.expectedOutcome,
+                actualResult: node.actualResult,
+                learnings: node.learnings,
+                experimentId: node.experimentId,
+                experimentStatus: node.experimentStatus,
+                metrics: node.metrics ? JSON.stringify(node.metrics) : null,
+                parameters: node.parameters ? JSON.stringify(node.parameters) : null,
+                notebookLink: node.notebookLink,
+                parentId: node.parentId,
+                childrenIds: node.childrenIds ? JSON.stringify(node.childrenIds) : null,
+                isExpanded: node.isExpanded,
+                projectId
+              });
+            } catch (error) {
+              // If update fails, node might not exist - this is ok for newly created nodes
+              console.log(`Node ${node.id} update skipped (might be new)`);
+            }
+          })
+        );
+
+        // Update the last saved hash
+        lastSavedNodesRef.current = nodesHash;
+        setSaveStatus('saved');
+        console.log('✓ Auto-saved', nodes.length, 'cards');
+      } catch (error) {
+        console.error('Failed to save nodes:', error);
+        setSaveStatus('saved'); // Reset even on error to avoid stuck state
+      }
+    };
+
+    const timeoutId = setTimeout(saveNodes, 1000); // Debounce saves
+    return () => clearTimeout(timeoutId);
+  }, [nodes, project, projectId]);
+
+  // Note: Connections are saved immediately when created in completeConnection function
+  // This prevents duplicate saves and ensures connections are saved as soon as they're made
+
+  // Removed unused handleCreateProject function
+
+  const handleNotebookUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !selectedNodeId) return;
+
+    if (!file.name.endsWith('.ipynb')) {
+      alert('Please upload a Jupyter notebook file (.ipynb)');
+      return;
+    }
+
+    setUploadingNotebook(true);
+    try {
+      const updatedNode = await api.uploadNotebook(selectedNodeId, file);
+
+      // Update local state
+      setNodes(nodes.map(n =>
+        n.id === selectedNodeId ? { ...n, notebookHtml: updatedNode.notebookHtml, notebookFilename: updatedNode.notebookFilename } : n
+      ));
+
+      alert('Notebook uploaded successfully!');
+    } catch (error: any) {
+      console.error('Failed to upload notebook:', error);
+      alert('Failed to upload notebook: ' + (error.message || 'Unknown error'));
+    } finally {
+      setUploadingNotebook(false);
     }
   };
 
-  const addNode = (type: NodeType) => {
+  const handleDeleteNotebook = () => {
+    if (!selectedNodeId) return;
+
+    if (!confirm('Are you sure you want to delete this notebook?')) return;
+
+    // Update local state to remove notebook
+    setNodes(nodes.map(n =>
+      n.id === selectedNodeId ? { ...n, notebookHtml: undefined, notebookFilename: undefined } : n
+    ));
+  };
+
+  const handleAddMetric = () => {
+    if (!selectedNodeId || !newMetricKey.trim() || !newMetricValue.trim()) return;
+
+    const node = nodes.find(n => n.id === selectedNodeId);
+    if (!node) return;
+
+    const currentMetrics = node.metrics || {};
+    const updatedMetrics = {
+      ...currentMetrics,
+      [newMetricKey]: newMetricValue
+    };
+
+    setNodes(nodes.map(n =>
+      n.id === selectedNodeId ? { ...n, metrics: updatedMetrics } : n
+    ));
+
+    setNewMetricKey('');
+    setNewMetricValue('');
+  };
+
+  const handleDeleteMetric = (key: string) => {
+    if (!selectedNodeId) return;
+
+    const node = nodes.find(n => n.id === selectedNodeId);
+    if (!node) return;
+
+    const currentMetrics = node.metrics || {};
+    const { [key]: _, ...updatedMetrics } = currentMetrics;
+
+    setNodes(nodes.map(n =>
+      n.id === selectedNodeId ? { ...n, metrics: updatedMetrics } : n
+    ));
+  };
+
+  const addNode = async (type: NodeType) => {
     if (!project) return;
 
     const newNode: NodeData = {
@@ -187,10 +409,25 @@ export default function WorkspacePage({ user, projectId, onLogout, onBackToHome 
       assignees: [],
       priority: 'medium',
       status: 'todo',
-      tags: []
+      tags: [],
+      // Container-specific properties
+      ...(type === 'container' && {
+        childrenIds: [],
+        isExpanded: true,
+      }),
     };
 
     setNodes([...nodes, newNode]);
+
+    // Save to backend
+    try {
+      await api.createNode({
+        ...newNode,
+        projectId
+      });
+    } catch (error) {
+      console.error('Failed to create node:', error);
+    }
   };
 
   const handleMouseDown = (e: React.MouseEvent, nodeId: string) => {
@@ -222,7 +459,44 @@ export default function WorkspacePage({ user, projectId, onLogout, onBackToHome 
     ));
   };
 
-  const handleMouseUp = () => {
+  const handleMouseUp = (e: React.MouseEvent) => {
+    if (!draggingNodeId) return;
+
+    // Check if we dropped on a container
+    const draggedNode = nodes.find(n => n.id === draggingNodeId);
+    if (draggedNode && !canvasRef.current) {
+      setDraggingNodeId(null);
+      return;
+    }
+
+    const rect = canvasRef.current!.getBoundingClientRect();
+    const mouseX = e.clientX - rect.left;
+    const mouseY = e.clientY - rect.top;
+
+    // Find if we dropped on a container
+    const containerNode = nodes.find(n =>
+      n.type === 'container' &&
+      n.id !== draggingNodeId &&
+      mouseX >= n.x && mouseX <= n.x + 600 &&
+      mouseY >= n.y && mouseY <= n.y + 300
+    );
+
+    if (containerNode) {
+      // Add to container
+      setNodes(nodes.map(n => {
+        if (n.id === containerNode.id) {
+          const childrenIds = n.childrenIds || [];
+          if (!childrenIds.includes(draggingNodeId)) {
+            return { ...n, childrenIds: [...childrenIds, draggingNodeId] };
+          }
+        }
+        if (n.id === draggingNodeId) {
+          return { ...n, parentId: containerNode.id };
+        }
+        return n;
+      }));
+    }
+
     setDraggingNodeId(null);
   };
 
@@ -231,7 +505,7 @@ export default function WorkspacePage({ user, projectId, onLogout, onBackToHome 
     setConnectingFrom(nodeId);
   };
 
-  const completeConnection = (e: React.MouseEvent, nodeId: string) => {
+  const completeConnection = async (e: React.MouseEvent, nodeId: string) => {
     e.stopPropagation();
     if (connectingFrom && connectingFrom !== nodeId) {
       const newConnection: Connection = {
@@ -240,6 +514,13 @@ export default function WorkspacePage({ user, projectId, onLogout, onBackToHome 
         to: nodeId
       };
       setConnections([...connections, newConnection]);
+
+      // Save connection to backend
+      try {
+        await api.createEdge(projectId, connectingFrom, nodeId);
+      } catch (error) {
+        console.error('Failed to save connection:', error);
+      }
     }
     setConnectingFrom(null);
   };
@@ -247,12 +528,13 @@ export default function WorkspacePage({ user, projectId, onLogout, onBackToHome 
   const toggleAssignee = (nodeId: string, memberId: string) => {
     setNodes(nodes.map(n => {
       if (n.id !== nodeId) return n;
-      const hasAssignee = n.assignees.includes(memberId);
+      const assignees = Array.isArray(n.assignees) ? n.assignees : [];
+      const hasAssignee = assignees.includes(memberId);
       return {
         ...n,
         assignees: hasAssignee
-          ? n.assignees.filter(id => id !== memberId)
-          : [...n.assignees, memberId]
+          ? assignees.filter(id => id !== memberId)
+          : [...assignees, memberId]
       };
     }));
   };
@@ -353,6 +635,23 @@ export default function WorkspacePage({ user, projectId, onLogout, onBackToHome 
           <h1 style={{ fontSize: '20px', fontWeight: 'bold', margin: 0, color: '#111827' }}>DS Forest</h1>
           <div style={{ width: '1px', height: '24px', backgroundColor: '#d1d5db' }} />
           <span style={{ fontSize: '18px', fontWeight: '500', color: '#374151' }}>{project.name}</span>
+
+          {/* Auto-save indicator */}
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '6px',
+            padding: '4px 10px',
+            backgroundColor: saveStatus === 'saved' ? '#f0fdf4' : saveStatus === 'saving' ? '#fef3c7' : '#fef2f2',
+            borderRadius: '6px',
+            fontSize: '12px',
+            fontWeight: '500',
+            color: saveStatus === 'saved' ? '#15803d' : saveStatus === 'saving' ? '#a16207' : '#991b1b'
+          }}>
+            {saveStatus === 'saved' && '✓ Saved'}
+            {saveStatus === 'saving' && '⟳ Saving...'}
+            {saveStatus === 'unsaved' && '○ Unsaved'}
+          </div>
         </div>
 
         <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
@@ -458,7 +757,7 @@ export default function WorkspacePage({ user, projectId, onLogout, onBackToHome 
             {/* Card Palette */}
             <div style={{ width: '260px', backgroundColor: 'white', borderRight: '1px solid #e5e7eb', padding: '16px' }}>
               <h3 style={{ fontSize: '14px', fontWeight: '600', marginBottom: '12px', color: '#111827' }}>Create Card</h3>
-              {(['start', 'solution', 'experiment', 'decision', 'end'] as NodeType[]).map((type) => (
+              {(['start', 'experiment', 'end'] as NodeType[]).map((type) => (
                 <button
                   key={type}
                   onClick={() => addNode(type)}
@@ -515,6 +814,7 @@ export default function WorkspacePage({ user, projectId, onLogout, onBackToHome 
               <div style={{ marginTop: '16px', padding: '12px', backgroundColor: '#eff6ff', borderRadius: '6px', fontSize: '11px', color: '#1e40af', lineHeight: '1.5' }}>
                 💡 <strong>Tips:</strong><br/>
                 • Drag cards to move<br/>
+                • Drop on container to group<br/>
                 • Shift+Click to connect<br/>
                 • Click to edit & assign
               </div>
@@ -530,13 +830,52 @@ export default function WorkspacePage({ user, projectId, onLogout, onBackToHome 
                 flex: 1,
                 position: 'relative',
                 backgroundColor: '#fafafa',
-                overflow: 'hidden',
+                overflow: 'auto',
                 cursor: draggingNodeId ? 'grabbing' : connectingFrom ? 'crosshair' : 'default'
               }}
             >
+              {/* Scrollable inner container with large canvas */}
+              <div style={{
+                position: 'relative',
+                minWidth: '3000px',
+                minHeight: '3000px',
+                backgroundImage: 'radial-gradient(circle, #e5e7eb 1px, transparent 1px)',
+                backgroundSize: '20px 20px'
+              }}
+              >
               {/* Draw connections */}
               <svg style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', pointerEvents: 'none' }}>
-                {connections.map(conn => {
+                {/* Sort connections by status: gray first, then red, then green (so green renders on top) */}
+                {connections
+                  .slice()
+                  .sort((a, b) => {
+                    const getConnectionStatus = (conn: Connection) => {
+                      const fromNode = nodes.find(n => n.id === conn.from);
+                      const toNode = nodes.find(n => n.id === conn.to);
+
+                      const checkStatus = (node: NodeData | undefined) => {
+                        if (node?.type === 'experiment' && node.experimentStatus) {
+                          return node.experimentStatus;
+                        }
+                        return null;
+                      };
+
+                      return checkStatus(fromNode) || checkStatus(toNode) || 'pending';
+                    };
+
+                    const statusA = getConnectionStatus(a);
+                    const statusB = getConnectionStatus(b);
+
+                    // Sort order: pending (0) < failure (1) < success (2)
+                    const statusOrder: Record<string, number> = {
+                      'pending': 0,
+                      'failure': 1,
+                      'success': 2
+                    };
+
+                    return (statusOrder[statusA] || 0) - (statusOrder[statusB] || 0);
+                  })
+                  .map(conn => {
                   const fromNode = nodes.find(n => n.id === conn.from);
                   const toNode = nodes.find(n => n.id === conn.to);
                   if (!fromNode || !toNode) return null;
@@ -546,16 +885,79 @@ export default function WorkspacePage({ user, projectId, onLogout, onBackToHome 
                   const toX = toNode.x + 100;
                   const toY = toNode.y + 70;
 
+                  // Calculate horizontal distance
+                  const horizontalDistance = Math.abs(toX - fromX);
+
+                  // If nodes are vertically aligned (within 50px tolerance), draw straight line
+                  // Otherwise, draw elbow connector
+                  let pathData;
+                  if (horizontalDistance < 50) {
+                    // Straight vertical line
+                    pathData = `M ${fromX} ${fromY} L ${toX} ${toY}`;
+                  } else {
+                    // Elbow connector (step line)
+                    const midY = fromY + (toY - fromY) / 2;
+                    pathData = `M ${fromX} ${fromY} L ${fromX} ${midY} L ${toX} ${midY} L ${toX} ${toY}`;
+                  }
+
+                  // Determine line color based on experiment status
+                  // Check both fromNode and toNode for experiment status
+                  let lineColor = '#94a3b8'; // Default gray
+                  let arrowMarker = 'url(#arrowhead)';
+
+                  // Check if either the source or target node is an experiment with a status
+                  const checkExperimentStatus = (node: NodeData) => {
+                    if (node.type === 'experiment' && node.experimentStatus) {
+                      return node.experimentStatus;
+                    }
+                    return null;
+                  };
+
+                  const fromStatus = checkExperimentStatus(fromNode);
+                  const toStatus = checkExperimentStatus(toNode);
+
+                  // Prioritize the experiment status (from source or target)
+                  const experimentStatus = fromStatus || toStatus;
+
+                  if (experimentStatus === 'success') {
+                    lineColor = '#10b981'; // Green
+                    arrowMarker = 'url(#arrowhead-success)';
+                  } else if (experimentStatus === 'failure') {
+                    lineColor = '#ef4444'; // Red
+                    arrowMarker = 'url(#arrowhead-failure)';
+                  }
+
                   return (
                     <g key={conn.id}>
-                      <line
-                        x1={fromX}
-                        y1={fromY}
-                        x2={toX}
-                        y2={toY}
-                        stroke="#94a3b8"
+                      {/* Invisible thick line for easier clicking */}
+                      <path
+                        d={pathData}
+                        stroke="transparent"
+                        strokeWidth="12"
+                        fill="none"
+                        style={{ cursor: 'pointer', pointerEvents: 'auto' }}
+                        onClick={async (e) => {
+                          e.stopPropagation();
+                          if (confirm('Delete this connection?')) {
+                            // Delete from backend
+                            try {
+                              await api.deleteEdge(conn.id);
+                            } catch (error) {
+                              console.error('Failed to delete connection from backend:', error);
+                            }
+                            // Update local state
+                            setConnections(connections.filter(c => c.id !== conn.id));
+                          }
+                        }}
+                      />
+                      {/* Visible line */}
+                      <path
+                        d={pathData}
+                        stroke={lineColor}
                         strokeWidth="2"
-                        markerEnd="url(#arrowhead)"
+                        fill="none"
+                        markerEnd={arrowMarker}
+                        style={{ pointerEvents: 'none' }}
                       />
                     </g>
                   );
@@ -571,11 +973,31 @@ export default function WorkspacePage({ user, projectId, onLogout, onBackToHome 
                   >
                     <polygon points="0 0, 10 3, 0 6" fill="#94a3b8" />
                   </marker>
+                  <marker
+                    id="arrowhead-success"
+                    markerWidth="10"
+                    markerHeight="10"
+                    refX="9"
+                    refY="3"
+                    orient="auto"
+                  >
+                    <polygon points="0 0, 10 3, 0 6" fill="#10b981" />
+                  </marker>
+                  <marker
+                    id="arrowhead-failure"
+                    markerWidth="10"
+                    markerHeight="10"
+                    refX="9"
+                    refY="3"
+                    orient="auto"
+                  >
+                    <polygon points="0 0, 10 3, 0 6" fill="#ef4444" />
+                  </marker>
                 </defs>
               </svg>
 
               {/* Render Card Nodes */}
-              {nodes.map((node) => (
+              {nodes.filter(n => !n.parentId).map((node) => (
                 <div
                   key={node.id}
                   onMouseDown={(e) => {
@@ -598,26 +1020,31 @@ export default function WorkspacePage({ user, projectId, onLogout, onBackToHome 
                     position: 'absolute',
                     left: node.x,
                     top: node.y,
-                    width: '200px',
-                    backgroundColor: node.type === 'experiment' && node.experimentStatus
+                    width: node.type === 'container' ? '600px' : '200px',
+                    minHeight: node.type === 'container' ? '300px' : 'auto',
+                    backgroundColor: node.type === 'container'
+                      ? '#f9fafb'
+                      : node.type === 'experiment' && node.experimentStatus
                       ? EXPERIMENT_STATUS_COLORS[node.experimentStatus]
                       : 'white',
                     border: selectedNodeId === node.id
                       ? '2px solid #3b82f6'
                       : connectingFrom === node.id
                       ? '2px solid #10b981'
+                      : node.type === 'container'
+                      ? '3px dashed #8b5cf6'
                       : node.type === 'experiment' && node.experimentStatus === 'success'
                       ? '2px solid #10b981'
                       : node.type === 'experiment' && node.experimentStatus === 'failure'
                       ? '2px solid #ef4444'
                       : '1px solid #e5e7eb',
                     borderRadius: '8px',
-                    cursor: draggingNodeId === node.id ? 'grabbing' : 'grab',
+                    cursor: draggingNodeId === node.id ? 'grabbing' : node.type === 'container' ? 'move' : 'grab',
                     boxShadow: draggingNodeId === node.id
                       ? '0 10px 25px rgba(0,0,0,0.15)'
                       : '0 1px 3px rgba(0,0,0,0.1)',
                     userSelect: 'none',
-                    overflow: 'hidden'
+                    overflow: 'visible'
                   }}
                 >
                   {/* Card Header */}
@@ -694,6 +1121,152 @@ export default function WorkspacePage({ user, projectId, onLogout, onBackToHome 
                         )}
                       </div>
                     )}
+
+                    {/* Container Drop Zone */}
+                    {node.type === 'container' && (
+                      <div style={{
+                        marginTop: '12px',
+                        padding: '16px',
+                        backgroundColor: 'white',
+                        border: '2px dashed #c7d2fe',
+                        borderRadius: '6px',
+                        minHeight: '180px',
+                        display: 'flex',
+                        flexWrap: 'wrap',
+                        gap: '12px',
+                        alignContent: 'flex-start'
+                      }}>
+                        {node.childrenIds && node.childrenIds.length > 0 ? (
+                          node.childrenIds.map((childId) => {
+                            const childNode = nodes.find(n => n.id === childId);
+                            if (!childNode) return null;
+                            return (
+                              <div
+                                key={childId}
+                                style={{
+                                  width: '160px',
+                                  padding: '8px',
+                                  backgroundColor: childNode.type === 'experiment' && childNode.experimentStatus
+                                    ? EXPERIMENT_STATUS_COLORS[childNode.experimentStatus]
+                                    : 'white',
+                                  border: selectedNodeId === childId
+                                    ? '2px solid #3b82f6'
+                                    : childNode.type === 'experiment' && childNode.experimentStatus === 'success'
+                                    ? '2px solid #10b981'
+                                    : childNode.type === 'experiment' && childNode.experimentStatus === 'failure'
+                                    ? '2px solid #ef4444'
+                                    : '1px solid #e5e7eb',
+                                  borderRadius: '6px',
+                                  boxShadow: selectedNodeId === childId
+                                    ? '0 0 0 3px rgba(59, 130, 246, 0.1)'
+                                    : '0 1px 2px rgba(0,0,0,0.05)',
+                                  cursor: 'pointer',
+                                  position: 'relative',
+                                  transition: 'all 0.2s'
+                                }}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setSelectedNodeId(childId);
+                                }}
+                              >
+                                {/* Remove from container button */}
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    // Remove from container
+                                    setNodes(nodes.map(n => {
+                                      if (n.id === node.id) {
+                                        return {
+                                          ...n,
+                                          childrenIds: (n.childrenIds || []).filter(id => id !== childId)
+                                        };
+                                      }
+                                      if (n.id === childId) {
+                                        const { parentId, ...rest } = n;
+                                        return { ...rest };
+                                      }
+                                      return n;
+                                    }));
+                                  }}
+                                  style={{
+                                    position: 'absolute',
+                                    top: '4px',
+                                    right: '4px',
+                                    width: '18px',
+                                    height: '18px',
+                                    padding: 0,
+                                    backgroundColor: '#ef4444',
+                                    color: 'white',
+                                    border: 'none',
+                                    borderRadius: '50%',
+                                    fontSize: '10px',
+                                    fontWeight: 'bold',
+                                    cursor: 'pointer',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    opacity: 0.8,
+                                    transition: 'opacity 0.2s'
+                                  }}
+                                  onMouseEnter={(e) => e.currentTarget.style.opacity = '1'}
+                                  onMouseLeave={(e) => e.currentTarget.style.opacity = '0.8'}
+                                  title="Remove from container"
+                                >
+                                  ×
+                                </button>
+
+                                <div style={{ fontSize: '11px', fontWeight: '600', color: '#111827', marginBottom: '4px', paddingRight: '20px' }}>
+                                  {childNode.label}
+                                </div>
+                                <div style={{ fontSize: '9px', color: '#6b7280', textTransform: 'uppercase' }}>
+                                  {childNode.type}
+                                </div>
+                                {childNode.type === 'experiment' && childNode.experimentStatus && (
+                                  <div style={{
+                                    marginTop: '4px',
+                                    padding: '2px 6px',
+                                    backgroundColor: childNode.experimentStatus === 'success' ? '#dcfce7' : childNode.experimentStatus === 'failure' ? '#fee2e2' : '#f3f4f6',
+                                    color: childNode.experimentStatus === 'success' ? '#166534' : childNode.experimentStatus === 'failure' ? '#991b1b' : '#6b7280',
+                                    borderRadius: '3px',
+                                    fontSize: '9px',
+                                    fontWeight: '600',
+                                    textAlign: 'center'
+                                  }}>
+                                    {childNode.experimentStatus.toUpperCase()}
+                                  </div>
+                                )}
+                                {selectedNodeId === childId && (
+                                  <div style={{
+                                    marginTop: '6px',
+                                    padding: '4px 6px',
+                                    backgroundColor: '#eff6ff',
+                                    borderRadius: '4px',
+                                    fontSize: '9px',
+                                    color: '#3b82f6',
+                                    fontWeight: '600',
+                                    textAlign: 'center'
+                                  }}>
+                                    SELECTED - Edit in sidebar →
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })
+                        ) : (
+                          <div style={{
+                            width: '100%',
+                            textAlign: 'center',
+                            padding: '40px 20px',
+                            color: '#9ca3af',
+                            fontSize: '12px'
+                          }}>
+                            <div style={{ marginBottom: '8px', fontSize: '24px' }}>📁</div>
+                            <div style={{ fontWeight: '500', marginBottom: '4px' }}>Drop experiments here</div>
+                            <div style={{ fontSize: '11px' }}>Drag and drop experiment cards into this container</div>
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
 
                   {/* Card Footer */}
@@ -711,7 +1284,7 @@ export default function WorkspacePage({ user, projectId, onLogout, onBackToHome 
 
                     {/* Assignees */}
                     <div style={{ display: 'flex', gap: '4px' }}>
-                      {node.assignees.slice(0, 3).map(assigneeId => {
+                      {(Array.isArray(node.assignees) ? node.assignees : []).slice(0, 3).map(assigneeId => {
                         const member = teamMembers.find(m => m.id === assigneeId);
                         if (!member) return null;
                         return (
@@ -736,7 +1309,7 @@ export default function WorkspacePage({ user, projectId, onLogout, onBackToHome 
                           </div>
                         );
                       })}
-                      {node.assignees.length > 3 && (
+                      {Array.isArray(node.assignees) && node.assignees.length > 3 && (
                         <div style={{
                           width: '20px',
                           height: '20px',
@@ -771,6 +1344,7 @@ export default function WorkspacePage({ user, projectId, onLogout, onBackToHome 
                   <p style={{ fontSize: '12px', marginTop: '12px' }}>Drag to move • Shift+Click to connect</p>
                 </div>
               )}
+              </div>
             </div>
 
             {/* Card Editor */}
@@ -1237,6 +1811,149 @@ export default function WorkspacePage({ user, projectId, onLogout, onBackToHome 
                       </div>
 
                       <div style={{ marginBottom: '16px' }}>
+                        <label style={{ fontSize: '12px', fontWeight: '600', display: 'block', marginBottom: '8px', color: '#374151' }}>
+                          Experiment Metrics
+                        </label>
+
+                        {/* Metrics Table */}
+                        {selectedNode.metrics && Object.keys(selectedNode.metrics).length > 0 && (
+                          <div style={{
+                            marginBottom: '12px',
+                            border: '1px solid #e5e7eb',
+                            borderRadius: '6px',
+                            overflow: 'hidden'
+                          }}>
+                            <table style={{
+                              width: '100%',
+                              borderCollapse: 'collapse',
+                              fontSize: '13px'
+                            }}>
+                              <thead>
+                                <tr style={{ backgroundColor: '#f9fafb' }}>
+                                  <th style={{
+                                    padding: '8px 12px',
+                                    textAlign: 'left',
+                                    fontWeight: '600',
+                                    color: '#374151',
+                                    borderBottom: '1px solid #e5e7eb'
+                                  }}>
+                                    Metric
+                                  </th>
+                                  <th style={{
+                                    padding: '8px 12px',
+                                    textAlign: 'left',
+                                    fontWeight: '600',
+                                    color: '#374151',
+                                    borderBottom: '1px solid #e5e7eb'
+                                  }}>
+                                    Value
+                                  </th>
+                                  <th style={{
+                                    padding: '8px 12px',
+                                    width: '60px',
+                                    borderBottom: '1px solid #e5e7eb'
+                                  }}></th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {Object.entries(selectedNode.metrics).map(([key, value]) => (
+                                  <tr key={key} style={{ borderBottom: '1px solid #f3f4f6' }}>
+                                    <td style={{
+                                      padding: '10px 12px',
+                                      color: '#374151',
+                                      fontWeight: '500'
+                                    }}>
+                                      {key}
+                                    </td>
+                                    <td style={{
+                                      padding: '10px 12px',
+                                      color: '#6b7280'
+                                    }}>
+                                      {String(value)}
+                                    </td>
+                                    <td style={{
+                                      padding: '10px 12px',
+                                      textAlign: 'center'
+                                    }}>
+                                      <button
+                                        onClick={() => handleDeleteMetric(key)}
+                                        style={{
+                                          background: 'none',
+                                          border: 'none',
+                                          color: '#ef4444',
+                                          cursor: 'pointer',
+                                          fontSize: '14px',
+                                          padding: '4px'
+                                        }}
+                                        title="Delete metric"
+                                      >
+                                        ✕
+                                      </button>
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        )}
+
+                        {/* Add New Metric */}
+                        <div style={{
+                          display: 'flex',
+                          gap: '8px',
+                          alignItems: 'flex-end'
+                        }}>
+                          <div style={{ flex: 1 }}>
+                            <input
+                              type="text"
+                              value={newMetricKey}
+                              onChange={(e) => setNewMetricKey(e.target.value)}
+                              placeholder="Metric name (e.g., Accuracy)"
+                              style={{
+                                width: '100%',
+                                padding: '8px',
+                                border: '1px solid #e5e7eb',
+                                borderRadius: '6px',
+                                fontSize: '13px'
+                              }}
+                            />
+                          </div>
+                          <div style={{ flex: 1 }}>
+                            <input
+                              type="text"
+                              value={newMetricValue}
+                              onChange={(e) => setNewMetricValue(e.target.value)}
+                              placeholder="Value (e.g., 0.95)"
+                              style={{
+                                width: '100%',
+                                padding: '8px',
+                                border: '1px solid #e5e7eb',
+                                borderRadius: '6px',
+                                fontSize: '13px'
+                              }}
+                            />
+                          </div>
+                          <button
+                            onClick={handleAddMetric}
+                            disabled={!newMetricKey.trim() || !newMetricValue.trim()}
+                            style={{
+                              padding: '8px 16px',
+                              backgroundColor: newMetricKey.trim() && newMetricValue.trim() ? '#3b82f6' : '#e5e7eb',
+                              color: newMetricKey.trim() && newMetricValue.trim() ? 'white' : '#9ca3af',
+                              border: 'none',
+                              borderRadius: '6px',
+                              fontSize: '13px',
+                              fontWeight: '500',
+                              cursor: newMetricKey.trim() && newMetricValue.trim() ? 'pointer' : 'not-allowed',
+                              whiteSpace: 'nowrap'
+                            }}
+                          >
+                            + Add
+                          </button>
+                        </div>
+                      </div>
+
+                      <div style={{ marginBottom: '16px' }}>
                         <label style={{ fontSize: '12px', fontWeight: '600', display: 'block', marginBottom: '6px', color: '#374151' }}>
                           Key Learnings
                         </label>
@@ -1272,19 +1989,83 @@ export default function WorkspacePage({ user, projectId, onLogout, onBackToHome 
 
                       <div style={{ marginBottom: '16px' }}>
                         <label style={{ fontSize: '12px', fontWeight: '600', display: 'block', marginBottom: '6px', color: '#374151' }}>
-                          Notebook Link
+                          Jupyter Notebook
                         </label>
-                        <input
-                          type="text"
-                          value={selectedNode.notebookLink || ''}
-                          onChange={(e) => {
-                            setNodes(nodes.map(n =>
-                              n.id === selectedNodeId ? { ...n, notebookLink: e.target.value } : n
-                            ));
-                          }}
-                          style={{ width: '100%', padding: '8px', border: '1px solid #e5e7eb', borderRadius: '6px', fontSize: '14px' }}
-                          placeholder="Jupyter notebook URL"
-                        />
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                          {!selectedNode.notebookFilename && (
+                            <input
+                              type="file"
+                              accept=".ipynb"
+                              onChange={handleNotebookUpload}
+                              disabled={uploadingNotebook}
+                              style={{
+                                padding: '8px',
+                                border: '1px solid #e5e7eb',
+                                borderRadius: '6px',
+                                fontSize: '13px',
+                                cursor: uploadingNotebook ? 'not-allowed' : 'pointer'
+                              }}
+                            />
+                          )}
+                          {uploadingNotebook && (
+                            <div style={{ fontSize: '12px', color: '#3b82f6' }}>
+                              Uploading and converting notebook...
+                            </div>
+                          )}
+                          {selectedNode.notebookFilename && (
+                            <div style={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'space-between',
+                              padding: '8px 12px',
+                              backgroundColor: '#f0fdf4',
+                              border: '1px solid #86efac',
+                              borderRadius: '6px'
+                            }}>
+                              <div style={{ flex: 1 }}>
+                                <div style={{ fontSize: '13px', fontWeight: '500', color: '#15803d' }}>
+                                  📓 {selectedNode.notebookFilename}
+                                </div>
+                                <div style={{ fontSize: '11px', color: '#16a34a', marginTop: '2px' }}>
+                                  Notebook uploaded
+                                </div>
+                              </div>
+                              <div style={{ display: 'flex', gap: '8px' }}>
+                                <button
+                                  onClick={() => setShowNotebookViewer(true)}
+                                  style={{
+                                    padding: '6px 12px',
+                                    backgroundColor: '#3b82f6',
+                                    color: 'white',
+                                    border: 'none',
+                                    borderRadius: '4px',
+                                    fontSize: '12px',
+                                    fontWeight: '500',
+                                    cursor: 'pointer'
+                                  }}
+                                >
+                                  View
+                                </button>
+                                <button
+                                  onClick={handleDeleteNotebook}
+                                  style={{
+                                    padding: '6px 12px',
+                                    backgroundColor: '#ef4444',
+                                    color: 'white',
+                                    border: 'none',
+                                    borderRadius: '4px',
+                                    fontSize: '12px',
+                                    fontWeight: '500',
+                                    cursor: 'pointer'
+                                  }}
+                                  title="Delete notebook"
+                                >
+                                  Delete
+                                </button>
+                              </div>
+                            </div>
+                          )}
+                        </div>
                       </div>
 
                       <div style={{ marginBottom: '16px' }}>
@@ -1361,10 +2142,30 @@ export default function WorkspacePage({ user, projectId, onLogout, onBackToHome 
                   )}
 
                   <button
-                    onClick={() => {
-                      setNodes(nodes.filter(n => n.id !== selectedNodeId));
-                      setConnections(connections.filter(c => c.from !== selectedNodeId && c.to !== selectedNodeId));
-                      setSelectedNodeId(null);
+                    onClick={async () => {
+                      if (!selectedNodeId) return;
+
+                      if (confirm('Are you sure you want to delete this card?')) {
+                        // Delete from backend first
+                        try {
+                          await api.deleteNode(selectedNodeId);
+
+                          // Also delete any connections to/from this node
+                          const edgesToDelete = connections.filter(
+                            c => c.from === selectedNodeId || c.to === selectedNodeId
+                          );
+                          await Promise.all(
+                            edgesToDelete.map(edge => api.deleteEdge(edge.id))
+                          );
+                        } catch (error) {
+                          console.error('Failed to delete node from backend:', error);
+                        }
+
+                        // Then update local state
+                        setNodes(nodes.filter(n => n.id !== selectedNodeId));
+                        setConnections(connections.filter(c => c.from !== selectedNodeId && c.to !== selectedNodeId));
+                        setSelectedNodeId(null);
+                      }
                     }}
                     style={{
                       width: '100%',
@@ -1743,6 +2544,81 @@ export default function WorkspacePage({ user, projectId, onLogout, onBackToHome 
           </div>
         )}
       </div>
+
+      {/* Notebook Viewer Modal */}
+      {showNotebookViewer && selectedNode?.notebookHtml && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          backgroundColor: 'rgba(0,0,0,0.5)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 10000
+        }}>
+          <div style={{
+            width: '90%',
+            height: '90%',
+            backgroundColor: 'white',
+            borderRadius: '12px',
+            display: 'flex',
+            flexDirection: 'column',
+            overflow: 'hidden'
+          }}>
+            {/* Header */}
+            <div style={{
+              padding: '16px 24px',
+              borderBottom: '1px solid #e5e7eb',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between'
+            }}>
+              <div>
+                <h2 style={{ margin: 0, fontSize: '18px', fontWeight: '600' }}>
+                  {selectedNode.notebookFilename || 'Jupyter Notebook'}
+                </h2>
+                <div style={{ fontSize: '13px', color: '#6b7280', marginTop: '4px' }}>
+                  {selectedNode.label}
+                </div>
+              </div>
+              <button
+                onClick={() => setShowNotebookViewer(false)}
+                style={{
+                  padding: '8px 16px',
+                  backgroundColor: '#f3f4f6',
+                  border: 'none',
+                  borderRadius: '6px',
+                  cursor: 'pointer',
+                  fontSize: '14px',
+                  fontWeight: '500'
+                }}
+              >
+                Close
+              </button>
+            </div>
+
+            {/* Notebook Content */}
+            <div style={{
+              flex: 1,
+              overflow: 'auto',
+              backgroundColor: '#f9fafb'
+            }}>
+              <iframe
+                srcDoc={selectedNode.notebookHtml}
+                style={{
+                  width: '100%',
+                  height: '100%',
+                  border: 'none'
+                }}
+                title="Jupyter Notebook"
+              />
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

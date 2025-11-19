@@ -19,6 +19,10 @@ interface ProjectStore {
   deleteNode: (nodeId: string) => void;
   selectNode: (nodeId: string | null) => void;
 
+  // Container actions
+  addNodeToContainer: (nodeId: string, containerId: string) => void;
+  removeNodeFromContainer: (nodeId: string) => void;
+
   // Edge actions
   addEdge: (edge: DSEdge) => void;
   deleteEdge: (edgeId: string) => void;
@@ -71,7 +75,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
 
     const newNode: DSNode = {
       id: generateId(),
-      type: 'default',
+      type: type === 'container' ? 'container' : 'default',
       position,
       data: {
         label: `${type.charAt(0).toUpperCase() + type.slice(1)} Node`,
@@ -84,6 +88,11 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
         type,
         createdAt: new Date(),
         updatedAt: new Date(),
+        // Container-specific properties
+        ...(type === 'container' && {
+          childrenIds: [],
+          isExpanded: true,
+        }),
       },
     };
 
@@ -128,10 +137,49 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
     const { project } = get();
     if (!project) return;
 
+    const nodeToDelete = project.nodes.find((n) => n.id === nodeId);
+    if (!nodeToDelete) return;
+
+    let updatedNodes = project.nodes.filter((node) => node.id !== nodeId);
+
+    // If deleting a container, orphan all its children
+    if (nodeToDelete.data.type === 'container' && nodeToDelete.data.childrenIds) {
+      updatedNodes = updatedNodes.map((node) => {
+        if (nodeToDelete.data.childrenIds?.includes(node.id)) {
+          const { parentId, ...restData } = node.data;
+          return {
+            ...node,
+            data: {
+              ...restData,
+              updatedAt: new Date(),
+            },
+          };
+        }
+        return node;
+      });
+    }
+
+    // If deleting a child node, remove it from parent's children list
+    if (nodeToDelete.data.parentId) {
+      updatedNodes = updatedNodes.map((node) => {
+        if (node.id === nodeToDelete.data.parentId && node.data.type === 'container') {
+          return {
+            ...node,
+            data: {
+              ...node.data,
+              childrenIds: (node.data.childrenIds || []).filter((id) => id !== nodeId),
+              updatedAt: new Date(),
+            },
+          };
+        }
+        return node;
+      });
+    }
+
     set({
       project: {
         ...project,
-        nodes: project.nodes.filter((node) => node.id !== nodeId),
+        nodes: updatedNodes,
         edges: project.edges.filter(
           (edge) => edge.source !== nodeId && edge.target !== nodeId
         ),
@@ -144,6 +192,92 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
 
   selectNode: (nodeId: string | null) => {
     set({ selectedNodeId: nodeId });
+  },
+
+  addNodeToContainer: (nodeId: string, containerId: string) => {
+    const { project } = get();
+    if (!project) return;
+
+    const updatedNodes = project.nodes.map((node) => {
+      // Update the container to include this node
+      if (node.id === containerId && node.data.type === 'container') {
+        const childrenIds = node.data.childrenIds || [];
+        return {
+          ...node,
+          data: {
+            ...node.data,
+            childrenIds: [...childrenIds, nodeId],
+            updatedAt: new Date(),
+          },
+        };
+      }
+      // Update the node to have this parent
+      if (node.id === nodeId) {
+        return {
+          ...node,
+          data: {
+            ...node.data,
+            parentId: containerId,
+            updatedAt: new Date(),
+          },
+        };
+      }
+      return node;
+    });
+
+    set({
+      project: {
+        ...project,
+        nodes: updatedNodes,
+        updatedAt: new Date(),
+      },
+    });
+    get().saveToStorage();
+  },
+
+  removeNodeFromContainer: (nodeId: string) => {
+    const { project } = get();
+    if (!project) return;
+
+    const node = project.nodes.find((n) => n.id === nodeId);
+    if (!node || !node.data.parentId) return;
+
+    const parentId = node.data.parentId;
+
+    const updatedNodes = project.nodes.map((n) => {
+      // Remove node from parent's children list
+      if (n.id === parentId && n.data.type === 'container') {
+        return {
+          ...n,
+          data: {
+            ...n.data,
+            childrenIds: (n.data.childrenIds || []).filter((id) => id !== nodeId),
+            updatedAt: new Date(),
+          },
+        };
+      }
+      // Remove parent reference from node
+      if (n.id === nodeId) {
+        const { parentId, ...restData } = n.data;
+        return {
+          ...n,
+          data: {
+            ...restData,
+            updatedAt: new Date(),
+          },
+        };
+      }
+      return n;
+    });
+
+    set({
+      project: {
+        ...project,
+        nodes: updatedNodes,
+        updatedAt: new Date(),
+      },
+    });
+    get().saveToStorage();
   },
 
   addEdge: (edge: DSEdge) => {

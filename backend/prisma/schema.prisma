@@ -40,7 +40,7 @@ model Project {
 
 model Node {
   id          String   @id @default(uuid())
-  type        String   // 'start' | 'solution' | 'experiment' | 'decision' | 'end'
+  type        String   // 'start' | 'container' | 'solution' | 'experiment' | 'decision' | 'end'
   label       String
   description String?
   x           Float
@@ -53,6 +53,11 @@ model Node {
   tags        String?  // JSON array of tags
   dueDate     String?
 
+  // Container support
+  parentId    String?  // ID of parent container (if this node is inside a container)
+  childrenIds String?  // JSON array of child node IDs (only for container type)
+  isExpanded  Boolean  @default(true) // Whether container is expanded (only for container type)
+
   // Experiment Tracking & Hypothesis Framework
   hypothesis       String?  // What hypothesis we're testing
   expectedOutcome  String?  // What we expect to happen
@@ -62,6 +67,8 @@ model Node {
   metrics          String?  // JSON: {"accuracy": 0.85, "loss": 0.12}
   parameters       String?  // JSON: {"learning_rate": 0.01, "epochs": 100}
   notebookLink     String?  // Link to Jupyter notebook
+  notebookHtml     String?  // Stored HTML version of uploaded Jupyter notebook
+  notebookFilename String?  // Original filename of the notebook
   experimentStatus String   @default("pending") // 'pending' | 'success' | 'failure'
 
   createdAt   DateTime      @default(now())

@@ -1,4 +1,4 @@
-import { CircleDot, Lightbulb, FlaskConical, GitBranch, CheckCircle } from 'lucide-react';
+import { CircleDot, Lightbulb, FlaskConical, GitBranch, CheckCircle, FolderOpen } from 'lucide-react';
 import { useProjectStore } from '../../stores/projectStore';
 import { NodeType } from '../../types';
 
@@ -8,6 +8,12 @@ const nodeTypes: Array<{ type: NodeType; icon: any; label: string; description: 
     icon: CircleDot,
     label: 'Start',
     description: 'Problem definition or starting point',
+  },
+  {
+    type: 'container',
+    icon: FolderOpen,
+    label: 'Container',
+    description: 'Group related experiments together',
   },
   {
     type: 'solution',
@@ -56,7 +62,7 @@ export default function NodePalette() {
 
   return (
     <div className="w-64 bg-white border-r border-gray-200 p-4">
-      <h3 className="font-semibold text-lg mb-4">Node Palette</h3>
+      <h3 className="font-semibold text-lg mb-4">Node Palette ({nodeTypes.length} types)</h3>
 
       <div className="space-y-2">
         {nodeTypes.map(({ type, icon: Icon, label, description }) => (

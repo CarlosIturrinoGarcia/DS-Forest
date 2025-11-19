@@ -13,11 +13,13 @@ import ReactFlow, {
 import 'reactflow/dist/style.css';
 
 import CustomNode from '../Nodes/CustomNode';
+import ContainerNode from '../Nodes/ContainerNode';
 import { useProjectStore } from '../../stores/projectStore';
 import { DSEdge } from '../../types';
 
 const nodeTypes: NodeTypes = {
   default: CustomNode,
+  container: ContainerNode,
 };
 
 export default function Canvas() {

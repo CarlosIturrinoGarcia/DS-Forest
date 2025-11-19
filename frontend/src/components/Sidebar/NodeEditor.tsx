@@ -1,11 +1,18 @@
 import { useEffect, useState } from 'react';
-import { X, Trash2 } from 'lucide-react';
+import { X, Trash2, FolderOpen, XCircle } from 'lucide-react';
 import { useProjectStore } from '../../stores/projectStore';
 import { NodeData, NodeStatus, NodeType } from '../../types';
 
 export default function NodeEditor() {
-  const { project, selectedNodeId, selectNode, updateNode, deleteNode } =
-    useProjectStore();
+  const {
+    project,
+    selectedNodeId,
+    selectNode,
+    updateNode,
+    deleteNode,
+    addNodeToContainer,
+    removeNodeFromContainer,
+  } = useProjectStore();
 
   const selectedNode = project?.nodes.find(
     (node) => node.id === selectedNodeId
@@ -67,6 +74,7 @@ export default function NodeEditor() {
             className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
           >
             <option value="start">Start</option>
+            <option value="container">Container</option>
             <option value="solution">Solution</option>
             <option value="experiment">Experiment</option>
             <option value="decision">Decision</option>
@@ -118,6 +126,78 @@ export default function NodeEditor() {
             <option value="abandoned">Abandoned</option>
           </select>
         </div>
+
+        {/* Container Management */}
+        {formData.type === 'container' ? (
+          // Show children for container nodes
+          <div className="bg-purple-50 border border-purple-200 rounded-md p-3">
+            <div className="flex items-center gap-2 mb-2">
+              <FolderOpen size={16} className="text-purple-600" />
+              <label className="text-sm font-medium text-gray-700">
+                Container Contents ({formData.childrenIds?.length || 0})
+              </label>
+            </div>
+            {formData.childrenIds && formData.childrenIds.length > 0 ? (
+              <div className="space-y-1">
+                {formData.childrenIds.map((childId) => {
+                  const childNode = project?.nodes.find((n) => n.id === childId);
+                  return (
+                    <div
+                      key={childId}
+                      className="flex items-center justify-between bg-white px-2 py-1.5 rounded text-sm"
+                    >
+                      <span className="text-gray-700 truncate">
+                        {childNode?.data.label || 'Unknown'}
+                      </span>
+                      <button
+                        onClick={() => removeNodeFromContainer(childId)}
+                        className="p-0.5 hover:bg-red-100 rounded text-red-600"
+                        title="Remove from container"
+                      >
+                        <XCircle size={14} />
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <p className="text-xs text-gray-500 italic">
+                No experiments in this container yet
+              </p>
+            )}
+          </div>
+        ) : (
+          // Show parent container selector for non-container nodes
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Container
+            </label>
+            <select
+              value={formData.parentId || ''}
+              onChange={(e) => {
+                const newParentId = e.target.value;
+                if (newParentId) {
+                  addNodeToContainer(selectedNodeId!, newParentId);
+                } else if (formData.parentId) {
+                  removeNodeFromContainer(selectedNodeId!);
+                }
+              }}
+              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+            >
+              <option value="">No container</option>
+              {project?.nodes
+                .filter((n) => n.data.type === 'container' && n.id !== selectedNodeId)
+                .map((container) => (
+                  <option key={container.id} value={container.id}>
+                    {container.data.label}
+                  </option>
+                ))}
+            </select>
+            <p className="text-xs text-gray-500 mt-1">
+              Group this node in a container
+            </p>
+          </div>
+        )}
 
         {/* Effort Slider */}
         <div>

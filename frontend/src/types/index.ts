@@ -1,6 +1,6 @@
 import { Node, Edge } from 'reactflow';
 
-export type NodeType = 'start' | 'solution' | 'experiment' | 'decision' | 'end';
+export type NodeType = 'start' | 'solution' | 'experiment' | 'decision' | 'end' | 'container';
 
 export type NodeStatus = 'active' | 'completed' | 'abandoned' | 'paused';
 
@@ -15,6 +15,10 @@ export interface NodeData {
   type: NodeType;
   createdAt: Date;
   updatedAt: Date;
+  // Container support
+  parentId?: string; // ID of parent container node
+  childrenIds?: string[]; // IDs of child nodes (only for container type)
+  isExpanded?: boolean; // Whether container is expanded (only for container type)
 }
 
 export interface DSNode extends Node {

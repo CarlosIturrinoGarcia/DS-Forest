@@ -116,6 +116,27 @@ class ApiService {
     });
   }
 
+  async uploadNotebook(nodeId: string, file: File) {
+    const formData = new FormData();
+    formData.append('notebook', file);
+
+    const token = localStorage.getItem('auth_token');
+    const response = await fetch(`${API_URL}/nodes/${nodeId}/notebook`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+      },
+      body: formData,
+    });
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ error: 'Upload failed' }));
+      throw new Error(error.error || 'Failed to upload notebook');
+    }
+
+    return response.json();
+  }
+
   // Edges
   async createEdge(projectId: string, fromId: string, toId: string) {
     return this.request('/edges', {
