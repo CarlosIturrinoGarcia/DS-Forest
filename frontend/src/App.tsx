@@ -1,11 +1,13 @@
 import { useState, useEffect } from 'react';
+import LandingPage from './pages/LandingPage';
 import LoginPage from './pages/LoginPage';
-import HomePage from './pages/HomePage';
+import DashboardPage from './pages/DashboardPage';
 import WorkspacePage from './pages/WorkspacePage';
 import { api } from './services/api';
 
 export default function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [showLogin, setShowLogin] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [user, setUser] = useState<any>(null);
   const [error, setError] = useState('');
@@ -56,6 +58,8 @@ export default function App() {
     setUser(null);
     localStorage.removeItem('auth_user');
     setIsAuthenticated(false);
+    setShowLogin(false);
+    setSelectedProjectId(null);
   };
 
   if (isLoading) {
@@ -90,13 +94,20 @@ export default function App() {
     );
   }
 
-  if (!isAuthenticated) {
+  // Show landing page if not authenticated and not on login page
+  if (!isAuthenticated && !showLogin) {
+    return <LandingPage onGetStarted={() => setShowLogin(true)} />;
+  }
+
+  // Show login page
+  if (!isAuthenticated && showLogin) {
     return <LoginPage onLogin={handleLogin} />;
   }
 
+  // Show dashboard (projects list) when authenticated but no project selected
   if (!selectedProjectId) {
     return (
-      <HomePage
+      <DashboardPage
         user={user}
         onLogout={handleLogout}
         onSelectProject={setSelectedProjectId}
@@ -104,6 +115,7 @@ export default function App() {
     );
   }
 
+  // Show workspace for selected project
   return (
     <WorkspacePage
       user={user}
