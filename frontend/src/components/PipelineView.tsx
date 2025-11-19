@@ -23,6 +23,8 @@ const PIPELINE_COMPONENTS = {
     { type: 'csv_loader', label: 'CSV Loader', icon: '📄', color: '#3b82f6' },
     { type: 'database', label: 'Database', icon: '🗄️', color: '#3b82f6' },
     { type: 'api', label: 'API Data', icon: '🌐', color: '#3b82f6' },
+    { type: 'image_folder', label: 'Image Folder', icon: '🖼️', color: '#3b82f6' },
+    { type: 'video', label: 'Video Source', icon: '🎥', color: '#3b82f6' },
   ],
   'Preprocessing': [
     { type: 'clean', label: 'Clean Data', icon: '🧹', color: '#10b981' },
@@ -30,23 +32,41 @@ const PIPELINE_COMPONENTS = {
     { type: 'encode', label: 'Encode', icon: '🔢', color: '#10b981' },
     { type: 'feature_engineering', label: 'Feature Engineering', icon: '⚙️', color: '#10b981' },
     { type: 'split', label: 'Train/Test Split', icon: '✂️', color: '#10b981' },
+    { type: 'augmentation', label: 'Data Augmentation', icon: '🔄', color: '#10b981' },
   ],
-  'Models': [
+  'Foundation Models': [
+    { type: 'yolo', label: 'YOLO (Object Detection)', icon: '🎯', color: '#dc2626' },
+    { type: 'mask_rcnn', label: 'Mask R-CNN (Segmentation)', icon: '🖌️', color: '#dc2626' },
+    { type: 'sam', label: 'SAM (Segment Anything)', icon: '✂️', color: '#dc2626' },
+    { type: 'resnet', label: 'ResNet (Classification)', icon: '🏷️', color: '#dc2626' },
+    { type: 'vit', label: 'Vision Transformer (ViT)', icon: '👁️', color: '#dc2626' },
+    { type: 'bert', label: 'BERT (NLP)', icon: '📝', color: '#dc2626' },
+    { type: 'gpt', label: 'GPT (LLM)', icon: '🤖', color: '#dc2626' },
+    { type: 'llama', label: 'LLaMA (Open LLM)', icon: '🦙', color: '#dc2626' },
+    { type: 'clip', label: 'CLIP (Vision-Language)', icon: '🔗', color: '#dc2626' },
+    { type: 'stable_diffusion', label: 'Stable Diffusion', icon: '🎨', color: '#dc2626' },
+    { type: 'whisper', label: 'Whisper (Speech-to-Text)', icon: '🎤', color: '#dc2626' },
+    { type: 'dalle', label: 'DALL-E (Text-to-Image)', icon: '🖼️', color: '#dc2626' },
+  ],
+  'Traditional Models': [
     { type: 'linear_regression', label: 'Linear Regression', icon: '📈', color: '#8b5cf6' },
     { type: 'random_forest', label: 'Random Forest', icon: '🌲', color: '#8b5cf6' },
     { type: 'neural_network', label: 'Neural Network', icon: '🧠', color: '#8b5cf6' },
     { type: 'xgboost', label: 'XGBoost', icon: '🚀', color: '#8b5cf6' },
     { type: 'svm', label: 'SVM', icon: '📊', color: '#8b5cf6' },
+    { type: 'kmeans', label: 'K-Means Clustering', icon: '🎲', color: '#8b5cf6' },
   ],
   'Evaluation': [
     { type: 'metrics', label: 'Metrics', icon: '📏', color: '#f59e0b' },
     { type: 'cross_validation', label: 'Cross Validation', icon: '🔄', color: '#f59e0b' },
     { type: 'confusion_matrix', label: 'Confusion Matrix', icon: '📋', color: '#f59e0b' },
+    { type: 'roc_curve', label: 'ROC Curve', icon: '📉', color: '#f59e0b' },
   ],
   'Output': [
     { type: 'export', label: 'Export Model', icon: '💾', color: '#ec4899' },
     { type: 'deploy', label: 'Deploy', icon: '🚀', color: '#ec4899' },
     { type: 'visualize', label: 'Visualize', icon: '📊', color: '#ec4899' },
+    { type: 'api_endpoint', label: 'API Endpoint', icon: '🔌', color: '#ec4899' },
   ],
 };
 
